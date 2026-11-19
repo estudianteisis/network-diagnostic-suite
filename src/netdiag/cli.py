@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from . import __version__
 from .analysis import compare_summaries, create_report
 from .monitor import MonitorConfig, mark_event, run_monitor
 from .targets import add_target, clear_targets, load_targets
@@ -28,6 +29,7 @@ def parser() -> argparse.ArgumentParser:
         prog="netdiag",
         description="Mide calidad, picos de latencia y cortes sin adivinar la causa.",
     )
+    root.add_argument("--version", action="version", version=f"netdiag {__version__}")
     commands = root.add_subparsers(dest="command", required=True)
     monitor = commands.add_parser("start", help="Iniciar medicion en vivo")
     monitor.add_argument("--label", default="player")

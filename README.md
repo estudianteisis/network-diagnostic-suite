@@ -32,6 +32,33 @@ python -m pip install -U pip
 python -m pip install -e ".[dev]"
 ```
 
+### Instalación global sin clonar el repositorio
+
+Para usar `netdiag` como aplicación aislada y actualizarla desde GitHub, instala primero
+[pipx](https://pipx.pypa.io/):
+
+```powershell
+py -m pip install --user pipx
+py -m pipx ensurepath
+```
+
+Reinicia PowerShell e instala la versión publicada en `main`:
+
+```powershell
+pipx install "git+https://github.com/estudianteisis/network-diagnostic-suite.git@main"
+```
+
+Actualizar, comprobar la versión y desinstalar:
+
+```powershell
+pipx upgrade network-diagnostic-suite
+netdiag --version
+pipx uninstall network-diagnostic-suite
+```
+
+Cada versión estable también publica archivos `.whl` y `.tar.gz` en GitHub Releases y queda
+identificada por una etiqueta como `v0.2.0`.
+
 ## Uso rápido
 
 En una terminal, inicia una sesión antes de jugar:
