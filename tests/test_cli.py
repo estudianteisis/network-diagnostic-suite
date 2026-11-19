@@ -20,5 +20,23 @@ def test_version_is_available(capsys):
     with pytest.raises(SystemExit, match="0"):
         parser().parse_args(["--version"])
     output = capsys.readouterr().out
-    assert output.startswith("netdiag 0.3.0")
+    assert output.startswith("netdiag 0.3.1")
     assert "Mediciones:" in output
+
+
+def test_start_help_describes_every_visible_option(capsys):
+    with pytest.raises(SystemExit):
+        parser().parse_args(["start", "--help"])
+    output = capsys.readouterr().out
+    for text in (
+        "Tiempo objetivo entre ciclos",
+        "Destino publico ICMP",
+        "Hostname utilizado",
+        "Resolvedor DNS directo",
+        "Endpoint para probar apertura TCP",
+        "Endpoint para probar handshake TLS",
+        "Gateway local",
+        "Carpeta de mediciones",
+        "Ejemplos:",
+    ):
+        assert text in output
