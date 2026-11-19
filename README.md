@@ -80,6 +80,26 @@ Detén el monitor con `Ctrl+C`. Genera el reporte:
 netdiag report
 ```
 
+### Captura avanzada con Pktmon (Windows)
+
+Para agregar una captura circular limitada de la interfaz de red, abre PowerShell como
+administrador y ejecuta:
+
+```powershell
+netdiag start --advanced --name "Prueba avanzada"
+```
+
+El límite predeterminado es 256 MB. Puedes cambiarlo entre 16 MB y 4096 MB:
+
+```powershell
+netdiag start --advanced --capture-size-mb 128
+```
+
+NetDiag guarda `advanced/pktmon.etl` dentro de la medición. Solo captura los primeros 128 bytes
+de cada paquete en las interfaces físicas, usa un buffer circular y nunca reemplaza ni detiene
+una sesión de Pktmon que ya estuviera activa. Este modo requiere permisos de administrador y la
+captura puede contener direcciones IP, consultas DNS y otros metadatos sensibles.
+
 Para comparar sesiones de dos jugadores (idealmente con relojes sincronizados):
 
 ```powershell

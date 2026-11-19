@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 
+from .advanced_capture import PktmonCapture
 from .detection import QualityDetector, human_probe, quality_label
 from .models import Event, utc_now
 from .probes import (
@@ -42,6 +43,8 @@ class MonitorConfig:
     tls_host: tuple[str, int] = ("www.cloudflare.com", 443)
     gateway: str | None = None
     custom_targets: tuple[CustomTarget, ...] = ()
+    advanced: bool = False
+    capture_size_mb: int = 256
     sessions_dir: Path = field(default_factory=default_measurements_dir)
 
 
@@ -74,6 +77,14 @@ def build_probes(config: MonitorConfig) -> list[NamedProbe]:
 async def run_monitor(config: MonitorConfig, console: Console | None = None) -> Path:
     console = console or Console()
     session_dir = make_session_dir(config)
+    capture = (
+        PktmonCapture(session_dir / "advanced" / "pktmon.etl", config.capture_size_mb)
+        if config.advanced
+        else None
+    )
+    capture_metadata: dict[str, object] = {"enabled": False}
+    if capture:
+        capture.preflight()
     store = EventStore(session_dir)
     gateway = config.gateway or discover_gateway()
     metadata = asdict(config)
@@ -82,6 +93,7 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
     metadata["started_utc"] = utc_now()
     metadata["started_local"] = datetime.now().astimezone().isoformat(timespec="seconds")
     metadata["environment"] = collect_start_context()
+    metadata["advanced_capture"] = capture_metadata
     write_json(session_dir / "session.json", metadata)
     config.sessions_dir.mkdir(parents=True, exist_ok=True)
     (config.sessions_dir / "active-session.txt").write_text(
@@ -118,6 +130,21 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
                 state = "[green]OK[/green]" if event.ok else "[red]FALLO[/red]"
                 table.add_row(human_probe(probe.name), quality_label(event.to_dict()), state)
         return table
+
+    if capture:
+        try:
+            capture_metadata = capture.start()
+        except Exception:
+            active = config.sessions_dir / "active-session.txt"
+            if active.exists():
+                active.unlink()
+            raise
+        metadata["advanced_capture"] = capture_metadata
+        write_json(session_dir / "session.json", metadata)
+        console.print(
+            "[yellow]Modo avanzado:[/yellow] pktmon activo "
+            f"(buffer circular de {config.capture_size_mb} MB)\n"
+        )
 
     try:
         with Live(dashboard(), console=console, refresh_per_second=4) as live:
@@ -156,6 +183,13 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
         pass
     finally:
         elapsed = time.monotonic() - started
+        if capture:
+            capture_metadata.update(capture.stop())
+            if capture_metadata["state"] == "stop-failed":
+                console.print(
+                    "[bold red]Advertencia:[/bold red] pktmon no confirmo el cierre. "
+                    "Ejecuta [bold]pktmon stop[/bold] como administrador."
+                )
         store.append(
             Event(
                 "session_end",
@@ -169,6 +203,7 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
         metadata["ended_local"] = datetime.now().astimezone().isoformat(timespec="seconds")
         metadata["duration_seconds"] = round(elapsed, 3)
         metadata["environment"] = finish_context(metadata["environment"], elapsed)
+        metadata["advanced_capture"] = capture_metadata
         write_json(session_dir / "session.json", metadata)
         active = config.sessions_dir / "active-session.txt"
         if active.exists() and active.read_text(encoding="utf-8").strip() == str(

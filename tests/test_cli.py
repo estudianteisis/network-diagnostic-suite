@@ -20,7 +20,7 @@ def test_version_is_available(capsys):
     with pytest.raises(SystemExit, match="0"):
         parser().parse_args(["--version"])
     output = capsys.readouterr().out
-    assert output.startswith("netdiag 0.3.1")
+    assert output.startswith("netdiag 0.4.0")
     assert "Mediciones:" in output
 
 
@@ -36,7 +36,18 @@ def test_start_help_describes_every_visible_option(capsys):
         "Endpoint para probar apertura TCP",
         "Endpoint para probar handshake TLS",
         "Gateway local",
+        "buffer circular de pktmon",
         "Carpeta de mediciones",
         "Ejemplos:",
     ):
         assert text in output
+
+
+def test_capture_size_requires_advanced():
+    with pytest.raises(SystemExit, match="requiere --advanced"):
+        main(["start", "--capture-size-mb", "128"])
+
+
+def test_capture_size_has_safe_limits():
+    with pytest.raises(SystemExit, match="entre 16 y 4096"):
+        main(["start", "--advanced", "--capture-size-mb", "8"])

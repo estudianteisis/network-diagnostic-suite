@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.console import Console
 
 from . import __version__
+from .advanced_capture import AdvancedCaptureError
 from .analysis import compare_summaries, create_report
 from .monitor import MonitorConfig, mark_event, run_monitor
 from .settings import default_measurements_dir, save_measurements_dir, validate_storage_root
@@ -56,6 +57,7 @@ def parser() -> argparse.ArgumentParser:
             "  netdiag start --interval 0.5 --target 104.160.136.3 "
             '--target-name "League LAN"\n'
             '  netdiag start --output-dir "D:\\Diagnosticos\\Red"'
+            "\n  netdiag start --advanced --capture-size-mb 256"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -120,6 +122,18 @@ def parser() -> argparse.ArgumentParser:
     )
     monitor.add_argument(
         "--clear-targets", action="store_true", help="Borrar destinos guardados antes de iniciar"
+    )
+    monitor.add_argument(
+        "--advanced",
+        action="store_true",
+        help="Capturar trafico con pktmon; requiere PowerShell como administrador",
+    )
+    monitor.add_argument(
+        "--capture-size-mb",
+        type=int,
+        default=256,
+        metavar="MB",
+        help="Tamano maximo del buffer circular de pktmon; solo con --advanced",
     )
     monitor.add_argument(
         "--output-dir",
@@ -254,6 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "start":
         if args.interval <= 0:
             raise SystemExit("--interval must be greater than zero")
+        if not 16 <= args.capture_size_mb <= 4096:
+            raise SystemExit("--capture-size-mb debe estar entre 16 y 4096")
+        if args.capture_size_mb != 256 and not args.advanced:
+            raise SystemExit("--capture-size-mb requiere --advanced")
         if args.clear_targets:
             removed = clear_targets(args.sessions_dir)
             console.print(f"Destinos guardados eliminados: {removed}")
@@ -287,11 +305,16 @@ def main(argv: list[str] | None = None) -> int:
             tls_host=args.tls_host,
             gateway=args.gateway,
             custom_targets=tuple(custom_targets),
+            advanced=args.advanced,
+            capture_size_mb=args.capture_size_mb,
             sessions_dir=args.sessions_dir,
         )
         session: Path | None = None
         try:
             session = asyncio.run(run_monitor(config, console))
+        except AdvancedCaptureError as exc:
+            console.print(f"[bold red]No se pudo iniciar el modo avanzado:[/bold red] {exc}")
+            return 2
         except KeyboardInterrupt:
             session = newest_session(args.sessions_dir)
         if session is not None:
