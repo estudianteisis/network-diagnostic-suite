@@ -84,7 +84,7 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
         except (NotImplementedError, RuntimeError):
             pass
     previous_interfaces = None
-    console.print(f"[green]Monitoring[/green] {len(probes)} probes → {session_dir}")
+    console.print(f"[green]Monitoring[/green] {len(probes)} probes -> {session_dir}")
     console.print("Use [bold]netdiag mark reconnecting[/bold] in another terminal; Ctrl+C stops.")
     started = time.monotonic()
     try:
