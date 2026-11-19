@@ -7,7 +7,7 @@ def test_help_lists_simple_commands_only(capsys):
     with pytest.raises(SystemExit):
         parser().parse_args(["--help"])
     output = capsys.readouterr().out
-    assert "{start,note,report,compare,targets}" in output
+    assert "{start,note,report,compare,targets,config}" in output
     assert "monitor" not in output
 
 
@@ -19,4 +19,6 @@ def test_legacy_monitor_command_is_still_accepted():
 def test_version_is_available(capsys):
     with pytest.raises(SystemExit, match="0"):
         parser().parse_args(["--version"])
-    assert capsys.readouterr().out.strip() == "netdiag 0.2.0"
+    output = capsys.readouterr().out
+    assert output.startswith("netdiag 0.3.0")
+    assert "Mediciones:" in output

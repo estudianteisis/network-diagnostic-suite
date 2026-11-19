@@ -107,7 +107,11 @@ def classify_window(events: list[dict[str, Any]]) -> dict[str, str]:
     }
 
 
-def summarize(events: list[dict[str, Any]], window_seconds: float = 10.0) -> dict[str, Any]:
+def summarize(
+    events: list[dict[str, Any]],
+    window_seconds: float = 10.0,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
         if event["kind"] in {"icmp", "dns", "dns_direct", "tcp", "tls"}:
@@ -160,13 +164,19 @@ def summarize(events: list[dict[str, Any]], window_seconds: float = 10.0) -> dic
         "metrics": metrics,
         "incidents": incidents,
         "markers": markers,
+        "measurement": metadata or {},
+        "environment": (metadata or {}).get("environment", {}),
         "caveat": "Classifications are evidence-compatible hypotheses, not proof of causality.",
     }
 
 
 def create_report(session_dir: Path, window_seconds: float = 10.0) -> tuple[Path, Path]:
     events = read_events(session_dir)
-    summary = summarize(events, window_seconds)
+    metadata_path = session_dir / "session.json"
+    metadata = (
+        json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+    )
+    summary = summarize(events, window_seconds, metadata)
     summary_path = session_dir / "summary.json"
     write_json(summary_path, summary)
     from .detection import human_probe
@@ -203,6 +213,19 @@ def create_report(session_dir: Path, window_seconds: float = 10.0) -> tuple[Path
     )
     payload = html.escape(json.dumps(summary, ensure_ascii=False))
     overview = summary["overview"]
+    environment = summary["environment"]
+    identity = environment.get("identity", {})
+    traffic = environment.get("session_traffic", {})
+    vpn_candidates = environment.get("possible_vpn_interfaces", [])
+    processes = environment.get("processes_at_start", {})
+    process_rows = "".join(
+        f"<tr><td>{html.escape(str(item.get('name', 'unknown')))}</td>"
+        f"<td>{item.get('pid', '')}</td><td>{item.get('memory_mb', '')} MB</td></tr>"
+        for item in processes.get("top_by_memory", [])[:10]
+    )
+    vpn_text = ", ".join(vpn_candidates) if vpn_candidates else "Ninguna interfaz candidata"
+    started_local = html.escape(str(summary["measurement"].get("started_local", "")))
+    ended_local = html.escape(str(summary["measurement"].get("ended_local", "")))
     document = f"""<!doctype html><html lang='es'><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width'><title>Reporte de calidad de red</title>
 <style>:root{{--ink:#152033;--muted:#667085;--line:#e4e7ec;--blue:#175cd3;--bg:#f8fafc}}
@@ -224,6 +247,21 @@ code{{word-break:break-all}}@media(max-width:700px){{.cards{{grid-template-colum
 <span class='subtitle'>Anotaciones tuyas</span>
 <span class='value'>{overview["manual_notes"]}</span></div></div>
 <h2>Linea temporal de degradaciones</h2>{incident_html}<h2>Tus anotaciones</h2>{marker_html}
+<h2>Contexto del equipo</h2><div class='cards'>
+<div class='card'><span class='subtitle'>Usuario / equipo</span><span class='value'>
+{html.escape(str(identity.get("user", "desconocido")))} @
+{html.escape(str(identity.get("hostname", "desconocido")))}</span></div>
+<div class='card'><span class='subtitle'>Trafico total durante la medicion</span>
+<span class='value'>{traffic.get("average_download_mbps", 0)} Mbps ↓ / 
+{traffic.get("average_upload_mbps", 0)} Mbps ↑</span></div>
+<div class='card'><span class='subtitle'>Posibles interfaces VPN</span>
+<span class='value'>{html.escape(vpn_text)}</span></div></div>
+<p class='subtitle'>Inicio local: {started_local} · Fin local: {ended_local} ·
+Sistema: {html.escape(str(identity.get("platform", "desconocido")))}</p>
+<details><summary>Procesos principales al iniciar (por memoria, no por ancho de banda)</summary>
+<table><thead><tr><th>Proceso</th><th>PID</th><th>Memoria</th></tr></thead>
+<tbody>{process_rows}</tbody></table><p>{html.escape(str(processes.get("bandwidth_note", "")))}</p>
+</details>
 <h2>Metricas por destino</h2><table><thead><tr><th>Medicion</th><th>Muestras</th>
 <th>Perdida</th><th>Mediana</th><th>P95</th><th>Maximo</th><th>Jitter</th></tr></thead>
 <tbody>{rows}</tbody></table><p class='warn'>{html.escape(summary["caveat"])}</p>

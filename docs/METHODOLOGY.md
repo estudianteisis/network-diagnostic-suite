@@ -37,7 +37,10 @@ que sea Riot: ambos usuarios podrían compartir ISP, región, DNS o ruta.
 
 ## Privacidad
 
-No se capturan paquetes, procesos, nombres de usuario ni direcciones MAC. Los nombres de
-interfaces y direcciones IP locales pueden aparecer en eventos; revisa los JSON antes de
-compartirlos. Los endpoints configurados y la etiqueta de sesión quedan registrados.
+No se capturan paquetes, contenido de tráfico, credenciales ni direcciones MAC. Para aportar
+contexto diagnóstico sí se registran el nombre de usuario local, hostname, versión del sistema,
+interfaces y direcciones IP locales, nombres/PID/memoria de procesos principales y posibles
+interfaces VPN. También se calcula el tráfico total del equipo durante la medición, pero no se
+atribuye a procesos individuales. Revisa `session.json`, `summary.json` y el HTML antes de
+compartirlos; pueden revelar información sobre el equipo y las aplicaciones abiertas.
 

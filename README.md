@@ -57,14 +57,14 @@ pipx uninstall network-diagnostic-suite
 ```
 
 Cada versión estable también publica archivos `.whl` y `.tar.gz` en GitHub Releases y queda
-identificada por una etiqueta como `v0.2.0`.
+identificada por una etiqueta como `v0.3.0`.
 
 ## Uso rápido
 
 En una terminal, inicia una sesión antes de jugar:
 
 ```powershell
-netdiag start --label jugador-1
+netdiag start --name "Ranked noche"
 ```
 
 Si notas algo, puedes anotarlo desde otra terminal (la detección automática sigue funcionando
@@ -83,7 +83,8 @@ netdiag report
 Para comparar sesiones de dos jugadores (idealmente con relojes sincronizados):
 
 ```powershell
-netdiag compare sessions\jugador-1\summary.json sessions\jugador-2\summary.json
+netdiag compare "C:\Users\tu-usuario\Documents\NetDiag\Mediciones\...\summary.json" `
+  "C:\ruta\jugador-2\summary.json"
 ```
 
 También puedes ajustar destinos y frecuencia:
@@ -139,11 +140,44 @@ prueban al menos dos redes públicas. No se captura tráfico ni credenciales.
 
 ## Archivos de una sesión
 
+Por defecto todo queda en:
+
+```text
+Documentos\NetDiag\Mediciones\
+  2026-11-19_21-35-08_Ranked-noche\
+    events.jsonl
+    session.json
+    summary.json
+    report.html
+```
+
+El nombre usa hora local legible y el valor de `--name`. Si dos mediciones coinciden en el
+mismo segundo se agrega `_2`, `_3`, etc. Los nombres peligrosos se limpian y los excesivamente
+largos se acortan conservando un hash. NetDiag valida la longitud completa antes de escribir y
+falla con una explicación si la carpeta base no deja margen seguro para Windows.
+
+Consulta o cambia la carpeta persistente en cualquier momento:
+
+```powershell
+netdiag config
+netdiag config --reports-dir "D:\Diagnosticos\Red"
+```
+
+También puedes cambiarla solo para una medición:
+
+```powershell
+netdiag start --name "prueba wifi" --output-dir "D:\Temporal\NetDiag"
+```
+
 - `events.jsonl`: eventos append-only con timestamps UTC y monotónicos.
-- `session.json`: configuración y metadatos sanitizados.
+- `session.json`: configuración, usuario/equipo, procesos y contexto de red.
 - `summary.json`: métricas y clasificaciones reproducibles.
 - `report.html`: reporte local autocontenido.
-- `active-session.txt`: puntero para `netdiag mark` (en el directorio `sessions`).
+- `active-session.txt`: puntero temporal para `netdiag note` en la carpeta de mediciones.
+
+El reporte incluye usuario, hostname, sistema, horas UTC y locales, interfaces, posibles VPN,
+procesos principales por memoria y tráfico total durante la medición. No atribuye ancho de banda
+a procesos individuales: hacerlo de forma fiable en Windows requiere ETW o captura privilegiada.
 
 ## Desarrollo
 

@@ -11,6 +11,7 @@ from rich.console import Console
 from . import __version__
 from .analysis import compare_summaries, create_report
 from .monitor import MonitorConfig, mark_event, run_monitor
+from .settings import default_measurements_dir, save_measurements_dir, validate_storage_root
 from .targets import add_target, clear_targets, load_targets
 
 
@@ -25,14 +26,20 @@ def endpoint(value: str) -> tuple[str, int]:
 
 
 def parser() -> argparse.ArgumentParser:
+    measurements_dir = default_measurements_dir()
     root = argparse.ArgumentParser(
         prog="netdiag",
         description="Mide calidad, picos de latencia y cortes sin adivinar la causa.",
     )
-    root.add_argument("--version", action="version", version=f"netdiag {__version__}")
+    root.add_argument(
+        "--version",
+        action="version",
+        version=f"netdiag {__version__}\nMediciones: {measurements_dir}",
+    )
     commands = root.add_subparsers(dest="command", required=True)
     monitor = commands.add_parser("start", help="Iniciar medicion en vivo")
-    monitor.add_argument("--label", default="player")
+    monitor.add_argument("--name", default="medicion", help="Nombre legible de la medicion")
+    monitor.add_argument("--label", dest="name", help=argparse.SUPPRESS)
     monitor.add_argument("--interval", type=float, default=1.0)
     monitor.add_argument("--public", action="append", default=[])
     monitor.add_argument("--dns-host", default="example.com")
@@ -48,14 +55,35 @@ def parser() -> argparse.ArgumentParser:
     monitor.add_argument(
         "--clear-targets", action="store_true", help="Borrar destinos guardados antes de iniciar"
     )
-    monitor.add_argument("--sessions-dir", type=Path, default=Path("sessions"))
+    monitor.add_argument(
+        "--output-dir",
+        dest="sessions_dir",
+        type=Path,
+        default=measurements_dir,
+        help=f"Carpeta de mediciones (predeterminada: {measurements_dir})",
+    )
+    monitor.add_argument(
+        "--sessions-dir",
+        dest="sessions_dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
     mark = commands.add_parser("note", help="Anotar algo que notaste")
     mark.add_argument("note", help="Ej: ping alto por unos segundos")
     mark.add_argument("--name", default="user-observation")
-    mark.add_argument("--sessions-dir", type=Path, default=Path("sessions"))
+    mark.add_argument("--output-dir", dest="sessions_dir", type=Path, default=measurements_dir)
+    mark.add_argument(
+        "--sessions-dir",
+        dest="sessions_dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
     report = commands.add_parser("report", help="Crear reporte legible")
     report.add_argument("session", type=Path, nargs="?")
     report.add_argument("--window", type=float, default=10.0)
+    report.add_argument("--output-dir", type=Path, default=measurements_dir)
     compare = commands.add_parser("compare", help="Comparar reportes de dos personas")
     compare.add_argument("summaries", type=Path, nargs="+")
     compare.add_argument("--tolerance", type=float, default=5.0)
@@ -64,7 +92,16 @@ def parser() -> argparse.ArgumentParser:
     targets.add_argument("--add", metavar="IP_O_HOSTNAME")
     targets.add_argument("--name", help="Nombre del destino")
     targets.add_argument("--clear", action="store_true", help="Borrar todos los destinos")
-    targets.add_argument("--sessions-dir", type=Path, default=Path("sessions"))
+    targets.add_argument("--output-dir", dest="sessions_dir", type=Path, default=measurements_dir)
+    targets.add_argument(
+        "--sessions-dir",
+        dest="sessions_dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+    config = commands.add_parser("config", help="Ver o cambiar la carpeta predeterminada")
+    config.add_argument("--reports-dir", type=Path, help="Nueva carpeta para mediciones")
     return root
 
 
@@ -120,8 +157,13 @@ def main(argv: list[str] | None = None) -> int:
             custom_targets.append(target)
         elif args.save_target:
             raise SystemExit("--save-target requiere --target IP_O_HOSTNAME")
+        try:
+            args.sessions_dir = validate_storage_root(args.sessions_dir)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        console.print(f"Carpeta de mediciones: [bold]{args.sessions_dir}[/bold]")
         config = MonitorConfig(
-            label=args.label,
+            name=args.name,
             interval=args.interval,
             public=tuple(args.public or ("1.1.1.1", "8.8.8.8")),
             dns_host=args.dns_host,
@@ -145,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "report":
         session = args.session
         if session is None:
-            session = newest_session(Path("sessions"))
+            session = newest_session(args.output_dir)
             if session is None:
                 raise SystemExit("No hay sesiones. Ejecuta `netdiag start` primero.")
         summary, report = create_report(session, args.window)
@@ -173,6 +215,16 @@ def main(argv: list[str] | None = None) -> int:
                 console.print("No hay destinos guardados.")
             for target in targets:
                 console.print(f"- [bold]{target.title}[/bold]: {target.address}")
+    elif args.command == "config":
+        if args.reports_dir:
+            try:
+                path = save_measurements_dir(args.reports_dir)
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+            console.print(f"[green]Carpeta predeterminada actualizada:[/green] {path}")
+        else:
+            console.print(f"Carpeta predeterminada: [bold]{default_measurements_dir()}[/bold]")
+            console.print("Cambiarla: netdiag config --reports-dir RUTA")
     return 0
 
 
