@@ -29,6 +29,7 @@ def parse_ping_output(output: str, elapsed_ms: float) -> tuple[bool, float | Non
 
 async def icmp_probe(target: str, timeout: float = 1.5) -> Event:
     started = time.perf_counter()
+    process: asyncio.subprocess.Process | None = None
     try:
         process = await asyncio.create_subprocess_exec(
             "ping",
@@ -48,6 +49,11 @@ async def icmp_probe(target: str, timeout: float = 1.5) -> Event:
         text = output.decode(errors="replace")
         ok, latency = parse_ping_output(text, elapsed)
         return Event("icmp", target, ok, latency, {"exit_code": process.returncode})
+    except asyncio.CancelledError:
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.communicate()
+        raise
     except (TimeoutError, OSError) as exc:
         return Event(
             "icmp",

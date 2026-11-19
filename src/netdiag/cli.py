@@ -10,6 +10,7 @@ from rich.console import Console
 
 from .analysis import compare_summaries, create_report
 from .monitor import MonitorConfig, mark_event, run_monitor
+from .targets import add_target, clear_targets, load_targets
 
 
 def endpoint(value: str) -> tuple[str, int]:
@@ -37,6 +38,14 @@ def parser() -> argparse.ArgumentParser:
     monitor.add_argument("--tcp-host", type=endpoint, default=("1.1.1.1", 443))
     monitor.add_argument("--tls-host", type=endpoint, default=("www.cloudflare.com", 443))
     monitor.add_argument("--gateway")
+    monitor.add_argument("--target", help="IP o hostname adicional para esta sesion")
+    monitor.add_argument("--target-name", help="Nombre mostrado para --target")
+    monitor.add_argument(
+        "--save-target", action="store_true", help="Guardar --target para futuras sesiones"
+    )
+    monitor.add_argument(
+        "--clear-targets", action="store_true", help="Borrar destinos guardados antes de iniciar"
+    )
     monitor.add_argument("--sessions-dir", type=Path, default=Path("sessions"))
     mark = commands.add_parser("note", help="Anotar algo que notaste")
     mark.add_argument("note", help="Ej: ping alto por unos segundos")
@@ -49,7 +58,36 @@ def parser() -> argparse.ArgumentParser:
     compare.add_argument("summaries", type=Path, nargs="+")
     compare.add_argument("--tolerance", type=float, default=5.0)
     compare.add_argument("--output", type=Path)
+    targets = commands.add_parser("targets", help="Ver o administrar destinos guardados")
+    targets.add_argument("--add", metavar="IP_O_HOSTNAME")
+    targets.add_argument("--name", help="Nombre del destino")
+    targets.add_argument("--clear", action="store_true", help="Borrar todos los destinos")
+    targets.add_argument("--sessions-dir", type=Path, default=Path("sessions"))
     return root
+
+
+def newest_session(sessions_dir: Path) -> Path | None:
+    candidates = sorted(
+        (path for path in sessions_dir.glob("*") if path.is_dir()),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def finish_session(session: Path, console: Console) -> None:
+    console.print("\n[bold green]Medicion terminada limpiamente.[/bold green]")
+    console.print(f"Datos crudos guardados en: [bold]{session}[/bold]")
+    try:
+        answer = console.input("¿Generar el reporte HTML ahora? (y/N): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
+    if answer in {"y", "yes", "s", "si", "sí"}:
+        summary, report = create_report(session)
+        console.print(f"[green]Reporte guardado:[/green] {report}")
+        console.print(f"Resumen JSON: {summary}")
+    else:
+        console.print("Reporte omitido. Puedes crearlo luego con: [bold]netdiag report[/bold]")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +100,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "start":
         if args.interval <= 0:
             raise SystemExit("--interval must be greater than zero")
+        if args.clear_targets:
+            removed = clear_targets(args.sessions_dir)
+            console.print(f"Destinos guardados eliminados: {removed}")
+        custom_targets = load_targets(args.sessions_dir)
+        if args.target:
+            if args.save_target:
+                target, _path = add_target(args.sessions_dir, args.target, args.target_name)
+            else:
+                from .targets import CustomTarget, validate_address
+
+                target = CustomTarget(
+                    validate_address(args.target),
+                    args.target_name or f"Destino {len(custom_targets) + 1}",
+                )
+            custom_targets = [item for item in custom_targets if item.address != target.address]
+            custom_targets.append(target)
+        elif args.save_target:
+            raise SystemExit("--save-target requiere --target IP_O_HOSTNAME")
         config = MonitorConfig(
             label=args.label,
             interval=args.interval,
@@ -71,23 +127,25 @@ def main(argv: list[str] | None = None) -> int:
             tcp_host=args.tcp_host,
             tls_host=args.tls_host,
             gateway=args.gateway,
+            custom_targets=tuple(custom_targets),
             sessions_dir=args.sessions_dir,
         )
-        asyncio.run(run_monitor(config, console))
+        session: Path | None = None
+        try:
+            session = asyncio.run(run_monitor(config, console))
+        except KeyboardInterrupt:
+            session = newest_session(args.sessions_dir)
+        if session is not None:
+            finish_session(session, console)
     elif args.command == "note":
         session = mark_event(args.name, args.note, args.sessions_dir)
         console.print(f"[green]Anotacion guardada[/green] en {session.name}")
     elif args.command == "report":
         session = args.session
         if session is None:
-            candidates = sorted(
-                (path for path in Path("sessions").glob("*") if path.is_dir()),
-                key=lambda path: path.name,
-                reverse=True,
-            )
-            if not candidates:
+            session = newest_session(Path("sessions"))
+            if session is None:
                 raise SystemExit("No hay sesiones. Ejecuta `netdiag start` primero.")
-            session = candidates[0]
         summary, report = create_report(session, args.window)
         console.print(f"[green]Reporte creado:[/green] {report}")
         console.print(f"Datos detallados: {summary}")
@@ -99,6 +157,20 @@ def main(argv: list[str] | None = None) -> int:
             console.print(f"[green]Created:[/green] {args.output}")
         else:
             console.print_json(rendered)
+    elif args.command == "targets":
+        if args.clear:
+            removed = clear_targets(args.sessions_dir)
+            console.print(f"Destinos eliminados: {removed}")
+        if args.add:
+            target, path = add_target(args.sessions_dir, args.add, args.name)
+            console.print(f"[green]Guardado:[/green] {target.title} -> {target.address}")
+            console.print(f"Configuracion: {path}")
+        if not args.add and not args.clear:
+            targets = load_targets(args.sessions_dir)
+            if not targets:
+                console.print("No hay destinos guardados.")
+            for target in targets:
+                console.print(f"- [bold]{target.title}[/bold]: {target.address}")
     return 0
 
 

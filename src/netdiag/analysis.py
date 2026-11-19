@@ -54,6 +54,8 @@ def classify_window(events: list[dict[str, Any]]) -> dict[str, str]:
     gateway_bad = degraded(by_probe.get("gateway", []))
     public = [items for name, items in by_probe.items() if name.startswith("public:")]
     public_bad = sum(degraded(items) for items in public)
+    custom = [items for name, items in by_probe.items() if name.startswith("custom:")]
+    custom_bad = sum(degraded(items) for items in custom)
     dns_bad = any(degraded(items) for name, items in by_probe.items() if name.startswith("dns:"))
     tcp_bad = degraded(by_probe.get("tcp", [])) or degraded(by_probe.get("tls", []))
     if gateway_bad:
@@ -76,6 +78,15 @@ def classify_window(events: list[dict[str, Any]]) -> dict[str, str]:
             "classification": "selective_route_or_target",
             "confidence": "medium",
             "reason": "Only one public path degraded; a general outage is not supported.",
+        }
+    if custom_bad:
+        return {
+            "classification": "custom_target_degradation",
+            "confidence": "medium" if public_bad == 0 else "low",
+            "reason": (
+                "El destino personalizado se degrado. Esto es compatible con una ruta o "
+                "destino selectivo; ICMP bloqueado sigue siendo una explicacion posible."
+            ),
         }
     if dns_bad and public_bad == 0:
         return {

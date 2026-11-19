@@ -66,6 +66,35 @@ netdiag start --interval 1 --public 1.1.1.1 --public 8.8.8.8 `
   --dns-host example.com --tcp-host 1.1.1.1:443 --tls-host www.cloudflare.com:443
 ```
 
+### Destinos personalizados
+
+Añade una IP o hostname solo para la sesión actual:
+
+```powershell
+netdiag start --target 104.160.136.3 --target-name "League LAN"
+```
+
+Guárdalo para que aparezca automáticamente en sesiones futuras:
+
+```powershell
+netdiag start --target 104.160.136.3 --target-name "League LAN" --save-target
+```
+
+También puedes administrar la lista sin iniciar una medición:
+
+```powershell
+netdiag targets --add 104.160.136.3 --name "League LAN"
+netdiag targets
+netdiag targets --clear
+```
+
+Si omites el nombre, se usan `Destino 1`, `Destino 2`, etc. Para borrar los destinos y comenzar
+inmediatamente una sesión limpia usa `netdiag start --clear-targets`.
+
+`104.160.136.3` es una dirección de referencia ampliamente asociada con LAN, pero no garantiza
+que sea el servidor exacto de una partida ni que Riot mantenga la dirección. Los destinos
+personalizados usan ICMP y deben interpretarse junto con las demás sondas.
+
 ## Cómo interpretar una clasificación
 
 | Evidencia cercana al marcador | Hipótesis prudente |

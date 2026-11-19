@@ -48,6 +48,17 @@ def test_healthy_window_does_not_blame_game():
     assert classify_window(events)["classification"] == "no_measured_network_fault"
 
 
+def test_custom_target_failure_is_selective():
+    now = datetime.now(UTC)
+    events = [
+        event("icmp", "104.160.136.3", False, now, "custom:League LAN"),
+        event("icmp", "1.1.1.1", True, now, "public:1.1.1.1"),
+        event("icmp", "192.168.1.1", True, now, "gateway"),
+    ]
+    result = classify_window(events)
+    assert result["classification"] == "custom_target_degradation"
+
+
 def test_summary_assesses_marker_window():
     now = datetime.now(UTC)
     events = [event("icmp", "192.168.1.1", False, now, "gateway")]

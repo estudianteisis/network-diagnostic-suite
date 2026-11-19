@@ -27,3 +27,11 @@ def test_one_spike_is_not_a_burst():
 def test_ignores_non_latency_probes():
     detector = QualityDetector()
     assert detector.observe("tls", sample(None, ok=False)) == []
+
+
+def test_custom_targets_have_same_detection():
+    detector = QualityDetector(min_baseline=1, absolute_latency_ms=100, consecutive_samples=2)
+    detector.observe("custom:League LAN", sample(20))
+    detector.observe("custom:League LAN", sample(200))
+    incident = detector.observe("custom:League LAN", sample(220))
+    assert incident[0].target == "custom:League LAN"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import signal
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -25,6 +25,7 @@ from .probes import (
     tls_probe,
 )
 from .storage import EventStore, write_json
+from .targets import CustomTarget
 
 
 @dataclass(slots=True)
@@ -37,6 +38,7 @@ class MonitorConfig:
     tcp_host: tuple[str, int] = ("1.1.1.1", 443)
     tls_host: tuple[str, int] = ("www.cloudflare.com", 443)
     gateway: str | None = None
+    custom_targets: tuple[CustomTarget, ...] = ()
     sessions_dir: Path = Path("sessions")
 
 
@@ -53,6 +55,10 @@ def build_probes(config: MonitorConfig) -> list[NamedProbe]:
         probes.append(NamedProbe("gateway", partial(icmp_probe, gateway)))
     probes.extend(
         NamedProbe(f"public:{target}", partial(icmp_probe, target)) for target in config.public
+    )
+    probes.extend(
+        NamedProbe(f"custom:{target.title}", partial(icmp_probe, target.address))
+        for target in config.custom_targets
     )
     probes.append(NamedProbe("dns:system", partial(dns_probe, config.dns_host)))
     probes.extend(
@@ -78,7 +84,7 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
     (config.sessions_dir / "active-session.txt").write_text(
         str(session_dir.resolve()), encoding="utf-8"
     )
-    probes = build_probes(MonitorConfig(**{**asdict(config), "gateway": gateway}))
+    probes = build_probes(replace(config, gateway=gateway))
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

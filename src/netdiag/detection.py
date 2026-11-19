@@ -22,7 +22,7 @@ class QualityDetector:
     active: set[str] = field(default_factory=set)
 
     def observe(self, probe: str, sample: Event) -> list[Event]:
-        if not (probe == "gateway" or probe.startswith("public:")):
+        if not (probe == "gateway" or probe.startswith("public:") or probe.startswith("custom:")):
             return []
         values = self.history[probe]
         baseline = statistics.median(values) if len(values) >= self.min_baseline else None
@@ -76,6 +76,8 @@ def human_probe(name: str) -> str:
         return "Red local / router"
     if name.startswith("public:"):
         return f"Internet ({name.removeprefix('public:')})"
+    if name.startswith("custom:"):
+        return name.removeprefix("custom:")
     if name == "dns:system":
         return "DNS del sistema"
     if name.startswith("dns:"):
