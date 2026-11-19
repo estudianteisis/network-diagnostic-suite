@@ -1,9 +1,9 @@
 # Network Diagnostic Suite
 
-Suite de diagnóstico para Windows orientada a microcortes: recoge evidencia simultánea
-de la red local, Internet, DNS y conexiones TCP/TLS para ayudar a explicar eventos como
-**“Reconnecting”** de League of Legends. No atribuye culpa automáticamente al ISP, Riot,
-Vanguard ni al computador.
+Monitor general de calidad de red para Windows. Detecta automáticamente bursts de latencia,
+jitter, respuestas perdidas y cortes, y recoge evidencia simultánea de la red local, Internet,
+DNS y conexiones TCP/TLS. Sirve para investigar ping alto, lag intermitente, microcortes o
+desconexiones en juegos y otras aplicaciones sin atribuir culpa automáticamente.
 
 ## Qué observa
 
@@ -11,8 +11,9 @@ Vanguard ni al computador.
 - Resolución DNS usando el resolvedor del sistema y, opcionalmente, consultas directas.
 - Apertura TCP y negociación TLS, separadas para distinguir fallos de ruta y aplicación.
 - Cambios de estado, dirección y contadores de las interfaces de Windows.
-- Marcadores manuales con hora UTC (por ejemplo, al ver “Reconnecting”).
-- Reporte HTML autocontenido y resumen JSON comparable entre dos jugadores.
+- Detección automática de bursts sostenidos usando línea base dinámica y umbral absoluto.
+- Anotaciones manuales con hora UTC para cualquier síntoma observado.
+- Panel en vivo comprensible y reporte HTML con resumen, línea temporal y percentil 95.
 
 Un timeout ICMP aislado **no equivale necesariamente a pérdida de paquetes**: algunos equipos
 depriorizan o bloquean ping. La clasificación combina señales independientes y conserva el
@@ -36,19 +37,20 @@ python -m pip install -e ".[dev]"
 En una terminal, inicia una sesión antes de jugar:
 
 ```powershell
-netdiag monitor --label jugador-1
+netdiag start --label jugador-1
 ```
 
-Cuando ocurra el problema, abre otra terminal y marca el evento:
+Si notas algo, puedes anotarlo desde otra terminal (la detección automática sigue funcionando
+aunque no anotes nada):
 
 ```powershell
-netdiag mark reconnecting --note "League mostró Reconnecting durante ~2 s"
+netdiag note "burst de ping y movimiento entrecortado"
 ```
 
 Detén el monitor con `Ctrl+C`. Genera el reporte:
 
 ```powershell
-netdiag report sessions\<sesion>
+netdiag report
 ```
 
 Para comparar sesiones de dos jugadores (idealmente con relojes sincronizados):
@@ -60,7 +62,7 @@ netdiag compare sessions\jugador-1\summary.json sessions\jugador-2\summary.json
 También puedes ajustar destinos y frecuencia:
 
 ```powershell
-netdiag monitor --interval 1 --public 1.1.1.1 --public 8.8.8.8 `
+netdiag start --interval 1 --public 1.1.1.1 --public 8.8.8.8 `
   --dns-host example.com --tcp-host 1.1.1.1:443 --tls-host www.cloudflare.com:443
 ```
 

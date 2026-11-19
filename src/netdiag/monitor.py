@@ -9,7 +9,10 @@ from functools import partial
 from pathlib import Path
 
 from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
+from .detection import QualityDetector, human_probe, quality_label
 from .models import Event, utc_now
 from .probes import (
     NamedProbe,
@@ -84,39 +87,62 @@ async def run_monitor(config: MonitorConfig, console: Console | None = None) -> 
         except (NotImplementedError, RuntimeError):
             pass
     previous_interfaces = None
-    console.print(f"[green]Monitoring[/green] {len(probes)} probes -> {session_dir}")
-    console.print("Use [bold]netdiag mark reconnecting[/bold] in another terminal; Ctrl+C stops.")
+    console.print("[bold green]NETDIAG - Calidad de red en vivo[/bold green]")
+    console.print(f"Sesion: {session_dir}")
+    console.print('Marca cualquier sintoma con: [bold]netdiag note "descripcion"[/bold]')
+    console.print("Detener y crear reporte: [bold]Ctrl+C[/bold]\n")
     started = time.monotonic()
+    detector = QualityDetector()
+    incident_count = 0
+    latest: dict[str, Event] = {}
+
+    def dashboard() -> Table:
+        table = Table(title=f"Estado actual | incidentes automaticos: {incident_count}")
+        table.add_column("Medicion", style="bold")
+        table.add_column("Resultado", justify="right")
+        table.add_column("Estado")
+        for probe in probes:
+            event = latest.get(probe.name)
+            if event is None:
+                table.add_row(human_probe(probe.name), "esperando", "...")
+            else:
+                state = "[green]OK[/green]" if event.ok else "[red]FALLO[/red]"
+                table.add_row(human_probe(probe.name), quality_label(event.to_dict()), state)
+        return table
+
     try:
-        while not stop.is_set():
-            cycle_started = time.monotonic()
-            results = await asyncio.gather(*(probe.call() for probe in probes))
-            for probe, event in zip(probes, results, strict=True):
-                event.detail["probe"] = probe.name
-                event.monotonic_s = time.monotonic() - started
-                store.append(event)
-            interfaces = interface_snapshot()
-            if interfaces != previous_interfaces:
-                store.append(
-                    Event(
-                        "interfaces",
-                        "local",
-                        True,
-                        detail={"snapshot": interfaces},
-                        monotonic_s=time.monotonic() - started,
+        with Live(dashboard(), console=console, refresh_per_second=4) as live:
+            while not stop.is_set():
+                cycle_started = time.monotonic()
+                results = await asyncio.gather(*(probe.call() for probe in probes))
+                for probe, event in zip(probes, results, strict=True):
+                    event.detail["probe"] = probe.name
+                    event.monotonic_s = time.monotonic() - started
+                    store.append(event)
+                    latest[probe.name] = event
+                    for incident in detector.observe(probe.name, event):
+                        incident.monotonic_s = event.monotonic_s
+                        store.append(incident)
+                        if incident.detail["state"] == "started":
+                            incident_count += 1
+                interfaces = interface_snapshot()
+                if interfaces != previous_interfaces:
+                    store.append(
+                        Event(
+                            "interfaces",
+                            "local",
+                            True,
+                            detail={"snapshot": interfaces},
+                            monotonic_s=time.monotonic() - started,
+                        )
                     )
-                )
-                previous_interfaces = interfaces
-            failed = [
-                probe.name for probe, event in zip(probes, results, strict=True) if not event.ok
-            ]
-            if failed:
-                console.print(f"[yellow]{utc_now()} failures:[/yellow] {', '.join(failed)}")
-            remaining = max(0.0, config.interval - (time.monotonic() - cycle_started))
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=remaining)
-            except TimeoutError:
-                pass
+                    previous_interfaces = interfaces
+                live.update(dashboard())
+                remaining = max(0.0, config.interval - (time.monotonic() - cycle_started))
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=remaining)
+                except TimeoutError:
+                    pass
     except KeyboardInterrupt:
         pass
     finally:

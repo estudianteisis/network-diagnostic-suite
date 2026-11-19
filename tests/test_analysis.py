@@ -65,6 +65,24 @@ def test_summary_assesses_marker_window():
     assert result["markers"][0]["assessment"]["classification"] == "local_network_or_router"
 
 
+def test_summary_includes_automatic_incidents():
+    now = datetime.now(UTC)
+    events = [event("icmp", "1.1.1.1", True, now, "public:1.1.1.1")]
+    events.append(
+        {
+            "kind": "quality_incident",
+            "target": "public:1.1.1.1",
+            "ok": False,
+            "timestamp_utc": now.isoformat().replace("+00:00", "Z"),
+            "duration_ms": 250,
+            "detail": {"state": "started", "signal": "latency_burst", "baseline_ms": 25},
+        }
+    )
+    result = summarize(events)
+    assert result["overview"]["automatic_incidents"] == 1
+    assert "degradaciones" in result["overview"]["health"]
+
+
 def test_compare_matches_close_markers(tmp_path):
     left = tmp_path / "left.json"
     right = tmp_path / "right.json"

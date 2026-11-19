@@ -29,6 +29,11 @@ def metric(events: list[dict[str, Any]]) -> dict[str, Any]:
             "median": round(statistics.median(latencies), 2) if latencies else None,
             "max": round(max(latencies), 2) if latencies else None,
             "jitter_mean_abs": round(statistics.mean(deltas), 2) if deltas else None,
+            "p95": (
+                round(statistics.quantiles(latencies, n=20, method="inclusive")[18], 2)
+                if len(latencies) >= 2
+                else (round(latencies[0], 2) if latencies else None)
+            ),
         },
     }
 
@@ -109,11 +114,40 @@ def summarize(events: list[dict[str, Any]], window_seconds: float = 10.0) -> dic
         markers.append(
             {**marker, "assessment": classify_window(nearby), "window_event_count": len(nearby)}
         )
+    incidents = []
+    for incident in (event for event in events if event["kind"] == "quality_incident"):
+        incidents.append(
+            {
+                "timestamp_utc": incident["timestamp_utc"],
+                "probe": incident["target"],
+                "state": incident.get("detail", {}).get("state"),
+                "signal": incident.get("detail", {}).get("signal"),
+                "latency_ms": incident.get("duration_ms"),
+                "baseline_ms": incident.get("detail", {}).get("baseline_ms"),
+            }
+        )
+    metrics = {name: metric(items) for name, items in sorted(grouped.items())}
+    started_events = [item for item in incidents if item["state"] == "started"]
+    failure_rates = [
+        value["failure_rate"] for value in metrics.values() if value["failure_rate"] is not None
+    ]
+    if started_events:
+        health = "Se detectaron degradaciones de calidad"
+    elif failure_rates and max(failure_rates) > 0:
+        health = "Hubo respuestas perdidas aisladas"
+    else:
+        health = "No se detectaron degradaciones en esta sesion"
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "started_utc": events[0]["timestamp_utc"] if events else None,
         "ended_utc": events[-1]["timestamp_utc"] if events else None,
-        "metrics": {name: metric(items) for name, items in sorted(grouped.items())},
+        "overview": {
+            "health": health,
+            "automatic_incidents": len(started_events),
+            "manual_notes": len(markers),
+        },
+        "metrics": metrics,
+        "incidents": incidents,
         "markers": markers,
         "caveat": "Classifications are evidence-compatible hypotheses, not proof of causality.",
     }
@@ -124,36 +158,65 @@ def create_report(session_dir: Path, window_seconds: float = 10.0) -> tuple[Path
     summary = summarize(events, window_seconds)
     summary_path = session_dir / "summary.json"
     write_json(summary_path, summary)
+    from .detection import human_probe
+
     rows = "".join(
-        f"<tr><td>{html.escape(name)}</td><td>{m['attempts']}</td><td>{m['failure_rate']}</td>"
-        f"<td>{m['latency_ms']['median']}</td><td>{m['latency_ms']['max']}</td>"
-        f"<td>{m['latency_ms']['jitter_mean_abs']}</td></tr>"
+        f"<tr><td><b>{html.escape(human_probe(name))}</b><small>{html.escape(name)}</small></td>"
+        f"<td>{m['attempts']}</td><td>{m['failure_rate'] * 100:.1f}%</td>"
+        f"<td>{m['latency_ms']['median']}</td><td>{m['latency_ms']['p95']}</td>"
+        f"<td>{m['latency_ms']['max']}</td><td>{m['latency_ms']['jitter_mean_abs']}</td></tr>"
         for name, m in summary["metrics"].items()
     )
     marker_html = (
         "".join(
-            f"<article><h3>{html.escape(m['target'])} — {html.escape(m['timestamp_utc'])}</h3>"
-            f"<p><b>{html.escape(m['assessment']['classification'])}</b> "
-            f"({html.escape(m['assessment']['confidence'])} confidence)</p>"
+            f"<article><h3>{html.escape(m['timestamp_utc'])}</h3>"
+            f"<p><b>{html.escape(m.get('detail', {}).get('note', m['target']))}</b></p>"
+            f"<p>{html.escape(m['assessment']['classification'])} "
+            f"(confianza {html.escape(m['assessment']['confidence'])})</p>"
             f"<p>{html.escape(m['assessment']['reason'])}</p>"
-            f"<p>Note: {html.escape(m.get('detail', {}).get('note', ''))}</p></article>"
+            "</article>"
             for m in summary["markers"]
         )
-        or "<p>No manual markers were recorded.</p>"
+        or "<p>No se agregaron anotaciones manuales.</p>"
+    )
+    incident_html = (
+        "".join(
+            f"<article class='incident'><h3>{html.escape(item['timestamp_utc'])}</h3>"
+            f"<p><b>{html.escape(human_probe(item['probe']))}: "
+            f"{html.escape(item['signal'] or 'degradacion')}</b></p>"
+            f"<p>Latencia: {item['latency_ms']} ms; base: {item['baseline_ms']} ms.</p></article>"
+            for item in summary["incidents"]
+            if item["state"] == "started"
+        )
+        or "<p>No se detectaron bursts sostenidos ni cortes.</p>"
     )
     payload = html.escape(json.dumps(summary, ensure_ascii=False))
-    document = f"""<!doctype html><html lang='en'><meta charset='utf-8'>
-<meta name='viewport' content='width=device-width'><title>Network diagnostic report</title>
-<style>body{{font:16px system-ui;max-width:1100px;margin:auto;padding:2rem;color:#17202a}}
-table{{border-collapse:collapse;width:100%}}
-th,td{{padding:.55rem;border:1px solid #ccd1d1;text-align:left}}
-th{{background:#edf2f7}}article{{border-left:4px solid #5b8def;padding:.2rem 1rem;margin:1rem 0}}
-.warn{{background:#fff3cd;padding:1rem}}code{{word-break:break-all}}</style>
-<h1>Network Diagnostic Suite report</h1><p class='warn'>{html.escape(summary["caveat"])}</p>
-<p>{summary["started_utc"]} → {summary["ended_utc"]}</p><h2>Probe metrics</h2>
-<table><thead><tr><th>Probe</th><th>Attempts</th><th>Failure rate</th><th>Median ms</th>
-<th>Max ms</th><th>Jitter ms</th></tr></thead><tbody>{rows}</tbody></table>
-<h2>Marked events</h2>{marker_html}<details><summary>Machine-readable summary</summary>
+    overview = summary["overview"]
+    document = f"""<!doctype html><html lang='es'><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width'><title>Reporte de calidad de red</title>
+<style>:root{{--ink:#152033;--muted:#667085;--line:#e4e7ec;--blue:#175cd3;--bg:#f8fafc}}
+body{{font:16px system-ui;max-width:1180px;margin:auto;padding:2rem;color:var(--ink);
+background:var(--bg)}}
+h1{{margin-bottom:.25rem}}.subtitle,small{{display:block;color:var(--muted)}}
+.cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:2rem 0}}
+.card{{background:white;border:1px solid var(--line);border-radius:12px;padding:1.25rem}}
+.value{{font-size:1.7rem;font-weight:750}}table{{border-collapse:collapse;width:100%;background:white}}
+th,td{{padding:.7rem;border-bottom:1px solid var(--line);text-align:left}}th{{background:#eef4ff}}
+article{{background:white;border-left:4px solid var(--blue);padding:.5rem 1rem;margin:1rem 0}}
+.incident{{border-color:#f79009}}.warn{{background:#fffaeb;padding:1rem;border-radius:8px}}
+code{{word-break:break-all}}@media(max-width:700px){{.cards{{grid-template-columns:1fr}}}}</style>
+<h1>Calidad de red</h1><p class='subtitle'>{summary["started_utc"]} a {summary["ended_utc"]}</p>
+<div class='cards'><div class='card'><span class='subtitle'>Resultado</span><span class='value'>
+{html.escape(overview["health"])}</span></div><div class='card'>
+<span class='subtitle'>Degradaciones</span>
+<span class='value'>{overview["automatic_incidents"]}</span></div><div class='card'>
+<span class='subtitle'>Anotaciones tuyas</span>
+<span class='value'>{overview["manual_notes"]}</span></div></div>
+<h2>Linea temporal de degradaciones</h2>{incident_html}<h2>Tus anotaciones</h2>{marker_html}
+<h2>Metricas por destino</h2><table><thead><tr><th>Medicion</th><th>Muestras</th>
+<th>Perdida</th><th>Mediana</th><th>P95</th><th>Maximo</th><th>Jitter</th></tr></thead>
+<tbody>{rows}</tbody></table><p class='warn'>{html.escape(summary["caveat"])}</p>
+<details><summary>Datos tecnicos completos</summary>
 <code>{payload}</code></details></html>"""
     report_path = session_dir / "report.html"
     report_path.write_text(document, encoding="utf-8")
